@@ -1,8 +1,5 @@
+import os
 
-# 第一个Python程序
-
-# 语法是固定的：学习语法
-# 看，写，做练习
-
-print(123)
-print(100)
+# 获取环境变量，第二个参数为默认值（可选）
+value = os.getenv("DASHSCOPE_API_KEY")
+print(value)  

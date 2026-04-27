@@ -488,5 +488,174 @@ select * from user where name = '张%'
    - 对融合后的分数进行降序排序，获取索引。
    - 根据索引提取对应的 `outputs` 作为最终结果。
 
+## 12. langhcain
+
+### 12.1 存在的意义
+
+>- 原生构建RAG，langchain也可以更高效地构建RAG
+>- 不仅可以构建RAG，也可以构建智能体
+>- 当下时代AI工程师岗位的核心素养
+
+
+
+### 12.2 什么是 LangChain？
+
+#### 从 LangChain 0.3 到 LangChain 1.0
+
+##### 版本与发布时间
+
+- **LangChain V1.0 上线时间**：2025 年 10 月 23 日正式发布
+- 官宣时间：2025 年 10 月 22 日，官方宣布 LangChain 1.0 与 LangGraph 1.0 即将发布
+
+------
+
+##### (1) 核心定位
+
+LangChain V1.0 相较于 V0.3，是一次**面向生产级工程化的重大升级**，在 API 设计、架构、可维护性、稳定性与扩展能力上实现了质的飞跃。
+
+------
+
+##### (2) 关键升级亮点
+
+1. **统一 Agent 创建接口**
+   - 新增 `create_agent()`，标准化 Agent 构建方式
+2. **中间件系统（Middleware）**
+   - 提供细粒度流程控制，方便自定义处理逻辑
+3. **标准化输出**
+   - `.content_blocks`：无论使用哪家模型，输出统一为结构化内容块
+4. **结构化输出原生支持**
+   - 将结构化输出能力直接集成到主循环中，无需额外适配
+5. **基于 LangGraph 的底层架构**
+   - Agent 本质是 LangGraph 编排的状态图（StateGraph），原生支持复杂状态管理与流程控制
+6. **包结构精简与平滑迁移路径**
+   - 移除冗余模块，核心包更轻量
+   - 旧版功能（如 `LLMChain`、`ConversationBufferMemory`）迁移到 `langchain-classic` 兼容包
+
+------
+
+##### (3) 一句话总结
+
+> LangChain 1.0 是面向生产环境的稳定重构版本，**以 LangGraph 为核心，接口更统一、架构更清晰、兼容性更好**，是当前 AI Agent / RAG 开发的主流选择。
+
+### 12.3   提示词模版
+
+1️⃣ 字符串提示词模版
+
+```
+# 字符串提示词模板 {text}  占位符，通过text变量动态设置提示词内容
+prompt = PromptTemplate(template="你是一个翻译助手，请讲以下内容翻译成{language}:{text}")
+
+# 输入参数内容，构建真正的提示词
+fact_prompt = prompt.format(language="中文", text="I am a handsome man")
+
+result = model.invoke(fact_prompt)
+```
+
+2️⃣ 对话提示词模版
+
+```
+# 设置对话提示词模板，设置角色
+prompt = ChatPromptTemplate.from_messages([
+    # ("system", "你是一个翻译助手，请将以下内容翻译成{language}"),
+    SystemMessagePromptTemplate.from_template("你是一个翻译助手，请将以下内容翻译成{language}"),
+    # ("human", "{text}"),
+    HumanMessagePromptTemplate.from_template("{text}")
+    # AIMessagePromptTemplate  ai的角色消息，用来记录维持对话
+])
+
+
+# 输入参数内容，构建真正的提示词
+fact_prompt = prompt.format(language="中文", text="I am a programmer")
+
+result = model.invoke(fact_prompt)
+```
+
+3️⃣  FrewShot Promt
+
+```
+# 创建少样本示例的对象
+prompt = FewShotPromptTemplate(
+    examples=examples, # 示例样本
+    example_prompt=prompt_sample, # 示例的提示模板
+    prefix="你是一个数学专家, 能够准确说出算式的类型，", #前缀
+    suffix="现在给你算式: {input} ， 值: {output} ，告诉我类型：", #后缀
+    input_variables=["input", "output"]
+)
+```
+
+4️⃣ 可选参数提示词
+
+```
+prompt_txt = "讲一个关于{date}的小故事：{text}"
+
+prompt = PromptTemplate(template=prompt_txt, input_variables=["date", "text"])
+
+# 输入参数内容，构建真正的提示词
+half_prompt = prompt.partial(date="2008-08-08")
+
+result = model.invoke(half_prompt.format(text="一个幸福的爱情故事"))
+#3.获取打印结果
+print(result.content)
+
+result = model.invoke(half_prompt.format(text="一个悲伤的爱情故事"))
+```
+
+### 12.4    chain的基础认知（后续深入）
+
+我们定义提示词，发送给大模型，并且接受大模型的返回并解析输出三步，可以使用超级简洁的chain去调用，传入字典就可以完成整个流程
+
+```
+# 1.创建模型客户端
+model = ChatTongyi()
+#2.构建提示词，访问模型
+prompt = PromptTemplate(template="你是一个翻译助手，请讲以下内容翻译成{language}:{text}")
+#3.解析大模型的返回
+parser = StrOutputParser()
+
+# 链的调用   在langchain中  "|" 是一个链的调用符
+chain = prompt | model | parser
+result = chain.invoke({"language": "中文", "text": "I am a programmer"})
+```
+
+>使整个过程处理更高效，并且能够构建更复杂的应用
+
+### 12.5   输出解析器（parser）
+
+- ###### 核心定义
+
+  **输出解析器（Output Parser）**：负责获取大语言模型（LLM）的输出，并将其转换为程序可直接使用的、结构化的格式，解决 “模型输出是文本，程序需要特定数据格式” 的问题。
+
+  ------
+
+  ###### 常见解析器类型
+
+  | 解析器名称                                       | 用途                                       | 适用场景                               |
+  | ------------------------------------------------ | ------------------------------------------ | -------------------------------------- |
+  | **StrOutputParser**                              | 最基础的解析器，直接将模型输出转换为字符串 | 通用场景，仅需获取纯文本结果           |
+  | **CommaSeparatedListOutputParser（CSV 解析器）** | 将模型以逗号分隔的输出，解析为 Python 列表 | 提取关键词、标签、选项等多值输出       |
+  | **DatetimeOutputParser（日期时间解析器）**       | 将模型输出解析为标准日期时间格式           | 日程安排、时间计算、格式标准化         |
+  | **JsonOutputParser（JSON 解析器）**              | 强制模型输出符合指定结构的 JSON 对象       | 结构化数据提取、API 参数生成、工具调用 |
+
+  ------
+
+  ###### 核心总结
+
+  输出解析器是 LLM 输出与程序数据格式之间的**翻译器**，让模型生成的自然语言，变成代码能直接处理的列表、日期、JSON 等结构化数据。
+
+### 12.6  langchain程序的部署（Fastapi + langserve）
+
+>部署之后，可以通过 `localhost:8000/lanchainServer/invoke`传参数调用api
+
+```
+#部署为服务  部署成web应用的框架
+app = FastAPI(title="基于LangChain的服务",version="V1.5",description="翻译服务")
+# 函数和访问路径一一对应
+add_routes(app, chain,path="/lanchainServer")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="localhost", port=8000)
+```
+
 
 
