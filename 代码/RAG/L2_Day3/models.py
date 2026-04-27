@@ -5,7 +5,7 @@
 
 # 阿里的通义千问大模型
 #    官网: https://bailian.console.aliyun.com/#/home
-ALI_TONGYI_API_KEY_OS_VAR_NAME = ""
+ALI_TONGYI_API_KEY_OS_VAR_NAME = "sk-9ec2a7a1ddec4bf78eda9df44be52d78"
 ALI_TONGYI_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 ALI_TONGYI_MAX_MODEL = "qwen3-max-2025-09-23"
 ALI_TONGYI_TURBO_MODEL = "qwen3-max-2025-09-23"
