@@ -1,102 +1,82 @@
 # chromaDB使用.py
 import chromadb
-from chromadb.config import Settings
 import json
-from models import *
+from dotenv import load_dotenv
+import os
+from openai import OpenAI
 
+# ====================== 【在这里填写你的阿里云 API Key】======================
+ALI_TONGYI_API_KEY = ""  # 替换成你的真实key
+# ============================================================================
 
+ALI_TONGYI_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+ALI_TONGYI_EMBEDDING_V3 = "text-embedding-v3"
 
-# 打开train.json文件，并读取数据
+# 加载JSON数据
 with open('../Data/train.json', 'r', encoding='utf-8') as f:
     data = [json.loads(line) for line in f.readlines()]
 
-# 将读取的数据按字段拆出放入instructions和outputs中
-# 在这个业务中，instruction因为需要被查询，需要向量化，output是和instruction对应的查询结果
-print(len(data))
-data = data[:10]
 instructions = [d['instruction'] for d in data]
 outputs = [d['output'] for d in data]
-print("instructions：", instructions)
-print("outputs：", outputs)
-print('-' * 100)
+
+print("数据条数：", len(instructions))
 
 
-# 负责和向量数据库打交道，接收文档转为向量，并保存到向量数据库中，然后根据需要从向量库中检索出最相似的记录
+# 向量数据库连接器
 class MyVectorDBConnector:
-    # 初始化，传入集合名称，和向量化函数名
     def __init__(self, collection_name):
-        # 当前配置中，数据保存在内存中，如果需要持久化到磁盘，需使用 PersistentClient创建客户端
-        chroma_client = chromadb.Client()
-        # 持久化到磁盘
-        # chroma_client = chromadb.PersistentClient(path="./chroma_data")
+        self.chroma_client = chromadb.PersistentClient(path="./chroma_data")
+        self.collection = self.chroma_client.get_or_create_collection(name=collection_name)
+        # 直接在这里创建客户端，不再依赖外部文件
+        self.client = OpenAI(
+            api_key=ALI_TONGYI_API_KEY,
+            base_url=ALI_TONGYI_URL
+        )
 
-        # 创建一个 collection
-        self.collection = chroma_client.get_or_create_collection(name=collection_name)
-
-        # 连接大模型的客户端
-        self.client = get_normal_client()
-
-    # 向量化
+    # 文本向量化
     def get_embeddings(self, texts, model=ALI_TONGYI_EMBEDDING_V3):
-        '''封装 OpenAI 的 Embedding 模型接口'''
         data = self.client.embeddings.create(input=texts, model=model).data
         return [x.embedding for x in data]
 
-    # 批量向量化：get_embeddings函数的变体版，因为各个模型对一次能处理的文本条数有限制且每个平台不一致，新增一个batch_size参数用以控制。
-    def get_embeddings_batch(self,texts, model=ALI_TONGYI_EMBEDDING_V3, batch_size=10):
+    # 批量向量化
+    def get_embeddings_batch(self, texts, model=ALI_TONGYI_EMBEDDING_V3, batch_size=5):
         all_embeddings = []
         for i in range(0, len(texts), batch_size):
-            # texts[0:10],texts[10:20],texts[20:30],texts[30:40],texts[40:50],texts[50:60]
             batch_text = texts[i:i + batch_size]
-            data = self.client.embeddings.create(input=batch_text, model=model).data
-            all_embeddings.extend([x.embedding for x in data])
+            embeddings = self.get_embeddings(batch_text, model)
+            all_embeddings.extend(embeddings)
         return all_embeddings
 
-    # 添加文档与向量
+    # 添加文档
     def add_documents(self, instructions, outputs):
-        '''向 collection 中添加文档与向量'''
         embeddings = self.get_embeddings_batch(instructions)
-
         self.collection.add(
-            embeddings=embeddings,  # 每个文档的向量
-            documents=outputs,  # 文档的原文
-            ids=[f"id{i}" for i in range(len(outputs))],  # 每个文档的 id
+            embeddings=embeddings,
+            documents=outputs,
+            ids=[f"id_{i}" for i in range(len(outputs))]
         )
-        print("self.collection.count():", self.collection.count())
+        print(f"✅ 已存入 {self.collection.count()} 条向量数据")
 
-    # 检索向量数据库
-    def search(self, query, n_results):
-        ''' 检索向量数据库
-           query是用户的查询，
-           n_results：查出n个相似最高的记录
-        '''
+    # 检索
+    def search(self, query, n_results=2):
+        query_embedding = self.get_embeddings([query])
         results = self.collection.query(
-            query_embeddings=self.get_embeddings_batch([query]),
+            query_embeddings=query_embedding,
             n_results=n_results,
+            include=["documents", "distances"]
         )
         return results
 
-        # 查询存储在向量数据库的数据。仅限于测试，实际使用中，请勿使用。该方法会返回向量数据库中的所有数据，包括文档内容、向量、元数据和ID。
 
-    def get(self, count):
-        results = self.collection.get(include=["documents", "embeddings", "metadatas"], limit=count)
-        return results
+# ====================== 执行 ======================
+if __name__ == "__main__":
+    vector_db = MyVectorDBConnector("medical_qa")
+    vector_db.add_documents(instructions, outputs)
 
+    user_query = "得了白癜风怎么办？"
+    results = vector_db.search(user_query, 1)
 
-# 创建一个向量数据库对象
-vector_db = MyVectorDBConnector("demo")
-
-# 向 向量数据库 中添加文档
-vector_db.add_documents(instructions, outputs)
-
-print("数据库内的数据为：" + str(vector_db.get(count=1)))
-
-user_query = "得了白癜风怎么办？"
-results = vector_db.search(user_query, 2)
-print(results)
-print('-' * 100)
-
-for para in results['documents'][0]:
-    print(para + "\n----\n")
-
-
+    print("\n查询结果：")
+    for doc in results['documents'][0]:
+        print("→", doc)
+        print("-"*50)

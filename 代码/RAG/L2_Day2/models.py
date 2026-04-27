@@ -126,13 +126,6 @@ def get_ali_clients():
     return get_ali_model_client(), get_ali_embeddings()
 
 
-# BGE-M3嵌入模型
-import ollama
-def get_embedding(text, model_name="bge-m3"):
-    # 使用ollama库获取嵌入向量
-    response = ollama.embed(model_name, text)
-    embedding = response['embeddings']
-    return embedding
 
 # 访问Qwen模型
 def get_completion(prompt, model=ALI_TONGYI_TURBO_MODEL):
