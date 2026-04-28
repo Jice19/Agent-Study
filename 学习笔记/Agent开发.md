@@ -755,3 +755,52 @@ print(chain.invoke({"k1": "hello world"}))
 {'passed':{'k1':'hello world','modefied':'hello world!!!'}}
 ```
 
+## 15、阶段练习：基于Langchain的电商客户反馈系统
+
+#### （一） 需求描述
+
+>###### 情感分析：判断用户反馈的情感倾向
+>
+>###### 问题分类：识别反馈中的问题类型
+>
+>###### 紧急程度评估：根据内容判断处理优先级
+>
+>###### 生成回复草稿：根据分析结果生成初步回复
+
+#### （二） 详细流程
+
+>前置条件：基于Fastapi获取到用户的输入信息，然后在接口处调用langchain服务获取结果返回，下面是关于langchain流程介绍
+
+- 第一步：从用户的输入中提取中订单号信息以及原始文本`RunnableParellel`（首选正则 -> 大模型兜底解析）
+
+  > 通过langchain的链式调用将第一步获取到的订单信息和用户的提问传给第二步
+
+- 第二步：通过`RunnablePassthrough`获取到用户的输入信息并且对信息进行增强
+
+- 第三步：并行执行调用大模型方法得出关键信息    -  注意数据结构！！！
+
+  > 补充点：强制使用prompt让大模型输出Json很可能不稳定,首先使用JSONParser解析器，如果报错才使用大模型的输出（try excpet）
+
+  ![22480ffa44cbcbc67f47567124a796af](/Users/apple/Library/Containers/com.tencent.qq/Data/Library/Application Support/QQ/nt_qq_2660a18f42d347253957f815ee444e2a/nt_data/Pic/2026-04/Ori/22480ffa44cbcbc67f47567124a796af.png)
+
+- 第四步：调用大模型提示词方法传输数据
+
+```
+# 节省大模型处理的时间，使用并行处理
+analysis_chain = RunnableParallel(
+# 情感分析
+    sentiment=RunnableLambda(analyze_sentiment),
+# 问题分类
+    categories=RunnableLambda(classify_issue),
+# 紧急程度
+    urgency=RunnableLambda(assess_urgency)
+)
+```
+
+##### (...)其他细节补充点
+
+```
+# lambda 表达式，简化形式，匿名函数的定义
+# def fun(x):
+#     return x
+```
