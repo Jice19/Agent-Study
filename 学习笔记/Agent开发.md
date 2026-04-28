@@ -755,6 +755,84 @@ print(chain.invoke({"k1": "hello world"}))
 {'passed':{'k1':'hello world','modefied':'hello world!!!'}}
 ```
 
+5️⃣ 预定义链：
+
+- LangChain 官方提供了多种预制的 LCEL 链，可在官方 API 文档中查询：
+
+  ```
+  https://reference.langchain.com/python/langchain_classic/chains/
+  ```
+
+- ⚠️ 注意：位于 `Deprecated classes 和 Deprecated functions` 中的类与函数属于**已声明废弃**，不建议在新项目中使用。
+
+  ------
+
+  ######  示例：`create_stuff_documents_chain`
+
+- **功能**：将多个文档内容合并成一个长文本，然后一次性交给 LLM 处理。
+
+### （五）记忆Memory
+
+##### 一、ChatMessageHistory
+
+几个核心api
+
+>```
+>#  创建消息历史记录，存储组件
+>chat_history = ChatMessageHistory()
+>
+># add_user_message() 添加用户的输入信息
+># add_ai_message() 添加存储大模型的回复信息
+># .messages 属性获取所有历史消息
+>```
+
+补充：**ChatMessageHistory** 本身不限制条数，但你传给 LLM 的历史消息越多，检索 / 理解效果会下降，成本会升高，速度会变慢，最终会超出模型最大长度报错 。**只存在运行内存里，临时存储、不落地、不持久化**。
+
+⚠️ **必须限制历史轮数**（推荐保留最近 5～10 轮），手动保存上下文的时候提示词模版需要携带上上下文`MessagesPlaceholder(variable_name="messages")`,  #QA
+
+##### 二、持久化记忆
+
+1️⃣ 将历史会话存储在数据库中 （redis、Mysql）
+
+- 安装docker 、启动redis 、下次启动指令(Mac)
+
+```
+//首次下载启动
+brew install --cask docker
+open /Applications/Docker.app
+docker run -d --name myredis -p 6379:6379 redis
+docker ps  //验证
+
+
+//之后启动指令
+# 1. 打开Docker
+open -a Docker
+
+# 2. 启动redis容器
+docker start myredis
+
+# 3. 查看是否运行
+docker ps
+
+# 4. 停止redis（关机前可选）
+docker stop myredis
+```
+
+2️⃣ 自动管理存储对话 **RunnableWithMessageHistory**
+
+```
+//传递链、存储记忆函数、用户的输入
+chatbot_with_his = RunnableWithMessageHistory(
+    # 执行流程
+    chain,
+    # 记忆存储的位置的函数
+    get_session_history,
+    input_messages_key="input",
+)
+```
+
+> 多用户对话存储需要session_id用户标识去区分上下文
+
 ## 15、阶段练习：基于Langchain的电商客户反馈系统
 
 #### （一） 需求描述
