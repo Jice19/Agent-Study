@@ -42,9 +42,9 @@ agent = create_agent(
 )
 # 执行agent
 # result = agent.invoke({"messages":[{"role":"user","content":"帮我打开淘宝"}]})
-# result = agent.invoke({"messages":[{"role":"user","content":"今天是几月几号？"}]})
+result = agent.invoke({"messages":[{"role":"user","content":"今天是几月几号？"}]})
 # 获取北京的今天的天气
-result = agent.invoke({"messages":[{"role":"user","content":"帮我打开淘宝"}]})
+# result = agent.invoke({"messages":[{"role":"user","content":"帮我打开淘宝"}]})
 print( result)
 
 

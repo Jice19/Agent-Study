@@ -1005,3 +1005,136 @@ retriever = vector_store.as_retriever()
 ```
 
 > 有向量相似度检索、向量相似度阈值检索和mmr检索
+
+5️⃣ 工具调用 & 中间件
+
+> 大模型本身只是预测模型，要直接操作物理事件或者一些函数方法，需要调用工具去拓展功能
+
+- 用法：通过列表方式将封装好的功能函数集绑定到模型客户端
+
+  ⚠️ 目前只是能够选择对应的工具调用，但是没有正确传递参数，需要结合到agent实现调用，问（“今天日期”）执行结果：
+
+```
+# 大模型客户端绑定工具：
+tool_llm = model.bind_tools([get_date, open_browser])
+
+# 执行结果：
+content='' additional_kwargs={'refusal': None} response_metadata={'token_usage': {'completion_tokens': 15, 'prompt_tokens': 271, 'total_tokens': 286, 'completion_tokens_details': None, 'prompt_tokens_details': {'audio_tokens': None, 'cached_tokens': 0}}, 'model_provider': 'openai', 'model_name': 'qwen-max', 'system_fingerprint': None, 'id': 'chatcmpl-ca6f6a4c-f5b3-94ad-9f3a-352ec3d27515', 'finish_reason': 'tool_calls', 'logprobs': None} id='lc_run--b16a1750-6836-409e-a790-1de5567fab88-0' tool_calls=[{'name': 'get_date', 'args': {}, 'id': 'call_4618e7aa762f44d2a071f8', 'type': 'tool_call'}] usage_metadata={'input_tokens': 271, 'output_tokens': 15, 'total_tokens': 286, 'input_token_details': {'cache_read': 0}, 'output_token_details': {}}
+```
+
+6️⃣ 自定义工具调用 - Agent
+
+一、定义好函数方法 ，需要使用**@tool装饰器 + 文本描述（""获取当前日期"""）**提前标识
+
+二、创建langchain工具列表交给Agent
+
+```
+# 大模型客户端绑定工具
+agent = create_agent(
+    model,
+    tools=[get_date, open_browser],
+    system_prompt # 系统提示词
+    checkpointer  # 记忆组件  -通常使用InMemorySaver()实现单对话的短期记忆
+)
+```
+
+7️⃣ Memory记忆会话实现机制
+
+>**InMemorySave () 本身没有固定的上下文长度限制**
+>
+>它**不会自动截断、不会自动遗忘**，理论上能**一直保留你整个对话的所有历史消息**，直到：
+>
+>- 程序重启
+>- 手动清空记忆
+>- 超出模型自身的 token 上限
+
+8️⃣ langchain本身也提供了许多预定义工具 - `langchain_community.agent_toolkits`
+
+9️⃣ langchain 中间件系统 
+
+>用于在Agent执行过程中拦截、修改和增强请求或响应处理逻辑，而无需修改agent核心代码或工具的代码
+>
+>用途：日志监视、调试和纪录，转换提示，工具调用和输出格式，添加重试、回退机制等等。。。
+
+图示新增钩子函数处理：` before_agent、before _model 、after_agent、after_model、wrap_model_call、wrap_tool_call`
+
+![image-20260503172347501](/Users/apple/Library/Application Support/typora-user-images/image-20260503172347501.png)
+
+一、内置中间件
+
+1、**SummarizationMiddleware** 核心参数 - 对话达到阈值时，**压缩历史对话为摘要 + 保留最新消息**，解决大模型上下文溢出问题。
+
+python
+
+```
+memory = InMemorySaver()
+agent = create_agent(
+    model=llm,
+    tools=[],
+    checkpointer=memory,
+    # 中间件列表，可以多个，多个顺序执行
+    middleware=[
+        SummarizationMiddleware(
+            model=llm,
+            max_tokens_before_summary=800,  # 800个token 会触发 摘要总结
+            messages_to_keep=1,  # 在总结后保留最后1条消息
+            # 可选 summary_prompt=" 可以自定义进行摘要的提示词...",
+            summary_prompt="请将以下对话历史进行简洁的摘要，保留关键信息: {messages}"
+        ),
+    ],
+    # 打印Agent执行的过程日志
+    debug= True
+)
+```
+
+二、自定义中间件
+
+通过智能体执行流程中的特定点运行钩子来构建自定义中间件
+
+> ###### wrap_model_call 环绕，在model调用前后都执行这个函数
+>
+> before_agent、before _model 、after_agent、after_model、wrap_model_call、wrap_tool_call同理
+
+- 基于装饰器的：对于单钩子中间件快速构建
+
+```
+# 前置，在调用模型前，执行这个函数
+@before_model
+def log_before_model(state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+    print(f"即将调用模型： {len(state['messages'])} 个消息")
+    return None
+```
+
+
+
+- 基于类的 ： 对于多个钩子的复杂中间件适用
+
+必须继承`AgentMiddleware`
+
+参考：
+
+```
+class LoggingMiddleware(AgentMiddleware):
+    def before_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+        print(f"即将调用模型： {len(state['messages'])} 个消息")
+        return None
+
+    def after_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+        print(f"模型返回消息: {state['messages'][-1].content}")
+        return None
+
+llm = ChatOpenAI(api_key=os.getenv("DASHSCOPE_API_KEY"), model="qwen-max",base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
+
+agent = create_agent(
+    model=llm,
+    middleware=[LoggingMiddleware()],
+)
+result = agent.invoke(
+    {
+        "messages": [{"role": "user","content": "你好",}]
+    }
+)
+```
+
+
+
