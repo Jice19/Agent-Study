@@ -903,3 +903,105 @@ analysis_chain = RunnableParallel(
 >预训练、SFT、RLHF 是 LLM 能力塑造的三层核心：预训练打底知识，SFT 对齐指令，RLHF 对齐人类偏好；
 >
 >LLM 的 “智能” 本质是参数对数据分布的拟合，而非真正的 “理解”，这也是其优势（大规模数据驱动）与局限（幻觉、无真正推理）的根源
+
+## 17、Langchain全面实战
+
+##### 一、Langchain中的RAG
+
+复习RAG整体流程：读取文档 -> 切割 -> 向量化 -> 存储 -> 检索 -> 增强 
+
+1️⃣ langchain中的文档加载器**loader**
+
+>#### 一、支持的文档类型与对应加载器
+>
+>- TXT 文档：TextLoader
+>- PDF 文档：PyPDFLoader
+>- CSV 文档：CSVLoader
+>- JSON 文档：JSONLoader
+>- HTML 文档：UnstructuredHTMLLoader
+>- MD 文档：UnStructuredMarkdownLoader
+>- 文件目录：DirectoryLoader
+>
+>#### 二、核心说明
+>
+>LangChain 具备强大的数据加载能力，支持多种常见格式（如文本、PDF、CSV、JSON、HTML、Markdown 等）。
+>
+>所有加载器都提供统一的 `load` 方法，用于从指定数据源读取数据，并将其转换为标准文档对象。
+
+2️⃣ langchain中的文档转换器 - **切割**
+
+```
+//递归切割
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=500, #切块大小
+    chunk_overlap=50,  # 切块重叠大小
+    # separators=[".", '\n', '!', '?', ';']
+)
+```
+
+>#### 一、LangChain 文档转换器的核心流程
+>
+>1. **两大核心步骤**
+>
+>   - 第一步：**文档切割**，由切割器（Splitter）完成，将长文档拆分为短片段。
+>   - 第二步：**格式转换**，将切割后的片段转换为 LangChain 统一的 `Document` 对象格式。
+>
+>   
+>
+>2. **`Document` 对象的核心地位**
+>
+>   - 它是 LangChain 中数据流通的**核心载体**，数据以 `Document` 对象和向量两种形式在各组件间传递。
+>   - 它包含**文本内容 + 相关元数据**，是 RAG（检索增强生成）流程中至关重要的基础概念。
+>
+>   ```
+>   documents = [
+>   #     Document(
+>   #         page_content="猫是柔软可爱的动物，但相对独立",
+>   #         metadata={"source": "常见动物宠物文档"},
+>   #     ),
+>   #     Document(
+>   #         page_content="狗是人类很早开始的动物伴侣，具有团队能力",
+>   #         metadata={"source": "常见动物宠物文档"},
+>   #     ),
+>   #     Document(
+>   #         page_content="金鱼是我们常常喂养的观赏动物之一，活泼灵动",
+>   #         metadata={"source": "鱼类宠物文档"},
+>   #     )] 
+>   ```
+>
+>------
+>
+>#### 二、数据流转链路
+>
+>- 输入源：各种源数据 / 文档数据
+>- 处理动作：加载、切割
+>- 统一格式：`Document` 对象
+>- 后续流程：`Document` 对象 → 嵌入模型包装器 → 向量存储
+
+3️⃣ langchain封装的嵌入向量模型包装器  将切割后的文档转换成向量
+
+```
+llm_embeddings = DashScopeEmbeddings(
+    # 模型名称
+    model=ALI_TONGYI_EMBEDDING_MODEL,
+    # API_KEY
+    dashscope_api_key=os.getenv(ALI_TONGYI_API_KEY_OS_VAR_NAME)
+)
+```
+
+4️⃣ 检索器（Retriever） - 简  VectorStoreRetrieveer
+
+```
+# 默认top-k=4
+retriever = vector_store.as_retriever()
+
+# 阈值相似度检索  -相似度达到对应阈值的document
+# retriever = vector_store.as_retriever(
+#     search_type="similarity_score_threshold",
+#     search_kwargs={
+#         "score_threshold": 0.3,
+#     }
+# )
+```
+
+> 有向量相似度检索、向量相似度阈值检索和mmr检索
