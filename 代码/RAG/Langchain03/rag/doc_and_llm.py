@@ -133,7 +133,11 @@ message = """
 prompt_template = ChatPromptTemplate.from_messages([('human',message)])
 # 定义这个链的时候，还不知道问题是什么，
 # 用RunnablePassthrough允许我们将用户的具体问题在实际使用过程中进行动态传入
-chain = {"question":RunnablePassthrough(),"context":retriever} | prompt_template | client
+chain = ({
+            "question":RunnablePassthrough(),
+            "context":retriever
+         }
+         | prompt_template | client)
 
 #用大模型生成答案
 resp = chain.invoke("晋升")
