@@ -1192,11 +1192,23 @@ result = agent.invoke(
 >
 >进行结果格式验证：例如使用 LangChain 中的 PydanticOutputParser 类来校验输出格式。
 >
-> Auto-Fixing 自修复：对不符合要求的格式进行自动修复
+> Auto-Fixing 自修复：对不符合要求的格式进行自动修复.用另一个大模型
 
 - **答案不完整 (Incomplete)**：答案只回答了问题的一部分。
+
+> **问题太复杂**：引导用户分成小问题提问，或者将用户的问题进行拆分
+
 - **未提取到答案 (Not Extracted)**： 提取的上下文中有答案，但大模型没有提取出来
+
+> **使用更强的大模型**
+>
+> 强化提示词：强调需要“必须基于上下文进行回答” 或“增强上下文聚焦”
+
 - **答案不够具体或过于具体**（Incorrect Specificity）
+
+> **提示词改善**
+>
+> **强化基座大模型**
 
 #### Advanced RAG优化点：(Rewriter)重写query、(Reranker)重排检索出来的文档、(consolidator)合并意思相近的context
 
