@@ -1213,3 +1213,26 @@ result = agent.invoke(
 #### Advanced RAG优化点：(Rewriter)重写query、(Reranker)重排检索出来的文档、(consolidator)合并意思相近的context
 
 ![image-20260505232727376](/Users/apple/Library/Application Support/typora-user-images/image-20260505232727376.png)
+
+## 19、Advanced RAG - PreRetriver 预检索
+
+#### 19.1 索引优化
+
+- 摘要索引
+
+  - 痛点分析：处理大量文档（长文本/长表格内容）时，无法快速准确地找到所需信息。1️⃣表格太长超出Embadding容量，2️⃣ 表格的召回率低
+  - 实现原理：使用LLM将chunk块提取出summery，然后把summerry向量化存入向量数据库，检索到summery返回对应的（uuid）document chunk作为上下文，chunk存储方式（内存 or redis or 持久化数据库）。避免了长文本信息的麻烦之处
+  - 适用场景：表格型、长文本型。如果表格信息不重要，没有必要用摘要索引
+
+  ![image-20260506002835804](/Users/apple/Library/Application Support/typora-user-images/image-20260506002835804.png)
+
+- 父子索引
+- 元数据索引
+
+
+
+> MultiVectorRetriver 多向量检索器：可以关联向量数据库和传统数据库
+>
+> 技术实现：给每个
+
+#### 19.2 查询优化
