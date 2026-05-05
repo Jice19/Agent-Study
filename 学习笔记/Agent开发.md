@@ -1138,3 +1138,66 @@ result = agent.invoke(
 
 
 
+## 18、Advanced RAG
+
+### 18.1 RAG商业化的痛点
+
+#### 原生RAG流程：
+
+![image-20260505231655055](/Users/apple/Library/Application Support/typora-user-images/image-20260505231655055.png)
+
+#### 原生RAG存在的问题：
+
+1️⃣ 索引构建过程：
+
+- **内容缺失 (Missing Content)**：原本的文本中就没有问题的答案。
+
+>措施：
+>
+>**增加完善对应知识库**
+>
+>**数据清洗与增强**：输入垃圾，必定输出垃圾。进行rag检索过程必须要进行数据清洗 (正则、大模型 or 人工)
+>
+>**更好的prompt设计**：针对缺失内容，防止大模型胡乱回答 （“如果当前知识库找不到对应context，回答“对不起，知识库中没有信					息””）
+
+- **文档加载准确性和效率**：比如 pdf 文件的加载，如何提取其中的有用文字信息和图片信息等。
+
+> **优化文档读取器**：一般知识库是一个文档，建议每一类型的文档单独设计解析器
+>
+> **数据清洗与增强**
+
+- **文档切分的粒度**：文本切分的大小和位置会影响后面检索出来的上下文完整性和与大模型交互的 token 数量，怎么控制好文档切分的度，是个难题。
+
+> **基于结构的分块**
+>
+> **基于langchain的递归分块（块大小+重叠度）**
+>
+> **参考RAG分块策略...**
+
+2️⃣ 检索增强过程
+
+- **错过排名靠前的文档（Missed Top Ranked）**：例如检索 top5，但是第 6 条也是相关内容。
+
+> **增加召回数量**：增加了大模型负担，干扰回答
+>
+> **重排Reranking**：后续了解算法
+
+- **提取上下文与答案无关（Not in Context）**：例如问的是天气，相关上下文是美食。
+
+> **内容缺失和错过排名靠前的文档的具体体现**
+
+- **格式错误 (Wrong Format)**：例如需要 Json，给了字符串。
+
+>Prompt 调优：优化 Prompt 逐渐让大模型返回正确的格式。
+>
+>进行结果格式验证：例如使用 LangChain 中的 PydanticOutputParser 类来校验输出格式。
+>
+> Auto-Fixing 自修复：对不符合要求的格式进行自动修复
+
+- **答案不完整 (Incomplete)**：答案只回答了问题的一部分。
+- **未提取到答案 (Not Extracted)**： 提取的上下文中有答案，但大模型没有提取出来
+- **答案不够具体或过于具体**（Incorrect Specificity）
+
+#### Advanced RAG优化点：(Rewriter)重写query、(Reranker)重排检索出来的文档、(consolidator)合并意思相近的context
+
+![image-20260505232727376](/Users/apple/Library/Application Support/typora-user-images/image-20260505232727376.png)
