@@ -1367,3 +1367,138 @@ flowchart TD
 流程图：
 
 ![image-20260506122820027](/Users/apple/Library/Application Support/typora-user-images/image-20260506122820027.png)
+
+#### 19.2.4 hybird search 混合检索
+
+> 适用全文关键字检索 + 向量相似度检索，然后二者各取一半的权重得到最终检索的内容文档
+>
+> 可以使用langchain的**EnsembleRetriever**归一化检索器进行权重分配和文档检索
+>
+> 对比⚠️  ： Naive RAG当中得到的权重需要做归一化，（当前权重 - 最小权重）  / （最大权重 - 最小权重）
+
+```
+ensembleRetriever = EnsembleRetriever(retrievers=[BM25_retriever, vector_retriever], weights=[0.5, 0.5])
+```
+
+```
+class Scaduler{
+		constructor(limit){
+				this.limit = limit
+				this.queue = []
+				this.count = 0
+		}
+		
+		add(task){
+				return new Promise(resolve => {
+						this.queue.push(() => task().then(resolve))
+						this.run()
+				})
+		}
+		
+		run(){
+				if(this.queue.length >= limit || !this.queue.length) return
+				
+				this.count++
+				const task = this.queue.shift()
+				
+				task().finally(() => {
+						this.count--
+						this.run()
+				})
+		}
+}
+
+
+//冒泡排序： 提前终止，最好时间复杂度为O(n),平均时间复杂度（nF）
+function bubleSort(arr){
+		let len = arr.length
+		for(let i = 0;i<len;i++){
+				let swrapped = false
+				for(let j =0;j<len - i - 1;j++){
+						if(arr[j] > arr[j+1]){
+								[arr[j],arr[j+1]] = [arr[j+1],arr[j]]
+								swrapper = true
+						}
+				}
+				if(!swrapper) break;
+		}
+}
+
+//快速排序
+function quickSort(arr){
+		let mid = arr[0],len = arr.length,left = [],right = []
+		for(let i=1;i<len;i++){
+				if(arr[i] > mid){
+						right.push(arr[i])
+				}else{
+						left.push(arr[i])
+				}
+		}
+		return [...quickSort(left),mid,...quickSort(right)]
+}
+
+//Promise.all
+function myPromiseAll(promises){
+		return new Promise((resolve,reject) => {
+				if(!Array.isArray(promises)){
+						return reject (new Error("传入参数必须是可迭代对象")
+				}
+				
+				let completedCount = 0, result = [],total = promises.length
+				
+				if(total === 0){
+					return resolve(result)
+				}
+				
+				promises.forEach((item,index) => {
+					 Promise.resolve(item).then((value) => {
+					 			result[index] = value
+					 			completedCount++
+					 			
+					 			if(completedCount === total){
+					 				 resolve(result)
+					 			}
+					 }).catch((reason) => {
+					 		reject(reason)
+					 })
+				})
+		})
+}
+
+//new 
+function myNew(Func,...args){
+		const obj = {}
+		obj.__proto__ = Func.prototype
+		let result = Func.apply(this,args)
+		return typeof result === 'object' ? result : {}
+}
+```
+
+## 20、关于Harness Engineering的思考
+
+> Harness = Agent - Model               - Langchain
+>
+> **整个AI工程的发展，从Prompt Engineering -> context Engineering -> 现在的Harness Engineering**
+>
+> Prompt Engineering 强调的是如何能向LLM表达描述
+>
+> context Engineering强调的是模型思考的上下文处理
+
+**OpenAI**发布的关于Harness Engineering的文章概括了去年八月纯Agent开发的一个百万行代码项目，大致做了三个方面的Harness构建
+
+- 上下文的分类工程：Agents.md里面100行左右仅描述目录，其他md限制文档在目录显示，所有信息都来源于仓库代码
+- 验证与反馈：为codex接入足够的工具和权限，让codex能够检测自己书写代码以及原地修复实现完整的链路，编写完成之后使用linter和测试验证代码的合规性和达到满足架构规范
+- 技术债清理：糟糕设计模式、魔法命名、落后的技术栈。针对这些错误编码规范，为codex搭建了设计代码评审Agent，设置了一个后台任务，找出过时的任务，设计维护方案
+
+> 核心理念：人类负责掌舵定方向，AI负责干活
+>
+> **虽然人类不再手写代码，但是软件工程的工作依然存在，软件工程师的职责变成了搭建稳定可靠的Agent框架为整个项目赋能，以此来提高代码产出的质量和效率**
+
+**Anthropic**的实践：
+
+- 任务规划（Planner）：拆解任务，类似spec的task.md
+- 质量评估（Generator + Evaluater）: 人工评估❌  agent自评 ❌  搭建一个三方专家评估Agent，不会对编码agent的产出做出滤镜
+
+ **Harness  Engineering 是不是噱头？**
+
+不是噱头，也不是终局。因为这个工程实实在在带来了效果，但是又仔细琢磨一下，这个工程里面的所有技术都不是新的，这些技术早就有了，比如任务规划（openspec/sdd范式编程），这个工程只是把这些技术重新组织了一下。随着大模型能力的强化，这些工程化的处理可能会被替代掉。
