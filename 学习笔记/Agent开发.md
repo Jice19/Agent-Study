@@ -1272,7 +1272,7 @@ retriever = MultiVectorRetriever(
 )
 ```
 
-
+![image-20260506104235026](/Users/apple/Library/Application Support/typora-user-images/image-20260506104235026.png)
 
 #### 19.1.4  元数据问题索引
 
@@ -1298,3 +1298,72 @@ retriever = SelfQueryRetriever.from_llm(
 > MultiVectorRetriver 多向量检索器：可以关联向量数据库和传统数据库
 
 ### 19.2 查询优化
+
+#### 19.2.1 Enrich 完善问题
+
+> 模型评估，不断诱导用户完善问题，直到信息完善总结用户问题，查询RAG生成回答
+
+```mermaid
+flowchart TD
+    A[开始] --> B[初始化大模型客户端 llm]
+    B --> C[用户输入 user_input]
+    C --> D[定义业务模板 templates]
+    D --> E[创建意图识别Prompt intent_prompt]
+    E --> F[创建意图识别链 intent_chain]
+    F --> G[识别用户意图 intent]
+    G --> H[获取对应模板 selected_template]
+    H --> I[构造信息补全Prompt info_prompt]
+    I --> J[创建聊天Prompt prompt]
+    J --> K[创建信息补全链 info_chain]
+    K --> L[创建带历史记录的处理链 with_message_history]
+    L --> M{问题是否完整？}
+    M -->|否| N[引导用户补充信息]
+    N --> O[更新信息]
+    O --> M
+    M -->|是| P[输出最终结果]
+    P --> Q[结束]
+```
+
+#### 19.2.2 multi-query 多路召回 - 问题的相似版本
+
+> 当用户输入的问题不太明确，我们做了多路召回处理：基于原有的问题生成多个相关问题，从不同视角进行生成问题，将这一批问题检索到的文档合并去重之后作为上下文，更加明确
+
+- 流程图：
+
+![image-20260506112115327](/Users/apple/Library/Application Support/typora-user-images/image-20260506112115327.png)
+
+- 落地方案： 1️⃣ 方法一：使用langchain的MultiQueryRetriever对查询做优化
+
+  ```
+  retrieval_from_llm = MultiQueryRetriever.from_llm(
+      retriever=retriever,
+      llm=llm,
+  )
+  ```
+
+  2️⃣ 方法二：自定义prompt
+
+  ```
+  # prompt模版
+  template = """你是一个AI语言模型助手。你的任务是生成5个给定用户问题的不同版本，以从向量中检索相关文档
+  数据库。通过对用户问题产生多种观点，你的目标是提供帮助用户克服了基于距离的相似性搜索的一些限制。
+  提供了这些用换行符隔开的可选问题。原始问题: {question}"""
+  ```
+
+#### 19.2.3 Decomposition 问题分解 - 问题的子问题
+
+> 某些大模型不具备推理分解任务的能力，可以参考prompt工程中的coT将任务进行拆分，有两种实现方式
+
+- 第一种：并行执行，将拆解后的任务并行执行获取结果，然后将结果进行合并
+- 第二种：串型链式执行，将上一个任务的答案作为下一个任务的问题的一部分，最后得到答案
+
+**适用场景：**
+
+**这个问题，能不能拆成 2～4 个小问题？**
+
+- 能 → 适合问题分解
+- 不能 → 不用问题分解
+
+流程图：
+
+![image-20260506122820027](/Users/apple/Library/Application Support/typora-user-images/image-20260506122820027.png)
