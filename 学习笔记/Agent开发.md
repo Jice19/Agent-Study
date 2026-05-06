@@ -1216,23 +1216,85 @@ result = agent.invoke(
 
 ## 19、Advanced RAG - PreRetriver 预检索
 
-#### 19.1 索引优化
+### 19.1 索引优化
 
-- 摘要索引
+#### 19.1.1摘要索引
 
-  - 痛点分析：处理大量文档（长文本/长表格内容）时，无法快速准确地找到所需信息。1️⃣表格太长超出Embadding容量，2️⃣ 表格的召回率低
-  - 实现原理：使用LLM将chunk块提取出summery，然后把summerry向量化存入向量数据库，检索到summery返回对应的（uuid）document chunk作为上下文，chunk存储方式（内存 or redis or 持久化数据库）。避免了长文本信息的麻烦之处
-  - 适用场景：表格型、长文本型。如果表格信息不重要，没有必要用摘要索引
+- 痛点分析：处理大量文档（长文本/长表格内容）时，无法快速准确地找到所需信息。1️⃣表格太长超出Embadding容量，2️⃣ 表格的召回率低
+- 实现原理：使用LLM将chunk块提取出summery，然后把summerry向量化存入向量数据库，检索到summery返回对应的（uuid）document chunk作为上下文，chunk存储方式（内存 or redis or 持久化数据库）。避免了长文本信息的麻烦之处
+- 适用场景：表格型、长文本型。如果表格信息不重要，没有必要用摘要索引
 
-  ![image-20260506002835804](/Users/apple/Library/Application Support/typora-user-images/image-20260506002835804.png)
+![image-20260506002835804](/Users/apple/Library/Application Support/typora-user-images/image-20260506002835804.png)
 
-- 父子索引
-- 元数据索引
+#### 19.1.2**父子索引**
+
+- - 将文档切割（文档 -> 主文档块 -> 子文档块），检索到对应top-k个子文档块，如果存在n个子文档块都指向一个父文档块，就用父文档块进行替换
+
+  - 主文档块用内存**存储原文本**，子文档块存储到**向量数据库**当中进行检索
+
+  - 检索时 ： **VectorRetriver检索子块**，**retriver**检索对应的父文档
+
+  - ###### 带来的好处
+
+    - 检索更准（子块细）
+    - 上下文更完整（父块大）
+    - 大幅降低幻觉、答案更连贯
+    - 特别适合**报告、合同、长文章、制度文件**
+
+  ```
+  #创建父子文档检索器，帮我们通过检索子块，返回父文档块
+  retriever = ParentDocumentRetriever(
+      vectorstore=vectorstore,
+      docstore=store, # 文档存储对象
+      child_splitter=child_splitter,  # 子文档分割器，子文档存储到向量数据库
+      parent_splitter=parent_splitter,  # 主文档分割器，主文档存储到内存中
+      search_kwargs={"k": 5},  # topK=1,相似度最高的子文档块
+  )
+  ```
+
+  
+
+  ![image-20260506092737648](/Users/apple/Library/Application Support/typora-user-images/image-20260506092737648.png)
 
 
+
+#### 19.1.3 假设问题索引
+
+- 将文档切块之后使用LLM生成对应的预测问题，将预测问题存储向量数据库当中，用doc_id将双方关联，检索到对应的问题返回问题对应的原文本作为上下文
+- 使用场景：**按 “标签 / 属性” 过滤，解决精准范围检索问题**
+
+```
+# 配置多向量检索器
+retriever = MultiVectorRetriever(
+    vectorstore=vectorstore, #  向量数据库，存储生成的问题向量（调用对话模型生成）
+    byte_store=store, # 字节存储，存储原始文档
+    id_key=id_key,
+)
+```
+
+
+
+#### 19.1.4  元数据问题索引
+
+- 核心： 自查询检索器。 将用户的问题切割成文档中有的metaData，构造成可查询的结构直接在向量数据库当中查询
+
+```
+# 创建自查询检索器（核心组件）
+'''SelfQueryRetriever 是 langchain 库中的一个工具，其主要功能是把自然语言查询转变为结构化查询，
+以此提升检索的精准度。它整合了检索器和语言模型，能依据查询内容自动推断出筛选条件，还能识别出相关的元数据字段。'''
+retriever = SelfQueryRetriever.from_llm(
+    llm,
+    vectorstore,
+    document_content_description,
+    metadata_field_info,
+    # enable_limit=True,  # 限定返回结果，和query搭配使用
+)
+```
+
+- 使用场景：让检索更 “懂人话”，大幅提高匹配成功率，尤其适合 QA 场景
+- 文档内容中提取出metaData，然后通过metaData和query的检索做处理
+- ![image-20260506100333376](/Users/apple/Library/Application Support/typora-user-images/image-20260506100333376.png)
 
 > MultiVectorRetriver 多向量检索器：可以关联向量数据库和传统数据库
->
-> 技术实现：给每个
 
-#### 19.2 查询优化
+### 19.2 查询优化
