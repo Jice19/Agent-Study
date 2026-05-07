@@ -1380,100 +1380,6 @@ flowchart TD
 ensembleRetriever = EnsembleRetriever(retrievers=[BM25_retriever, vector_retriever], weights=[0.5, 0.5])
 ```
 
-```
-class Scaduler{
-		constructor(limit){
-				this.limit = limit
-				this.queue = []
-				this.count = 0
-		}
-		
-		add(task){
-				return new Promise(resolve => {
-						this.queue.push(() => task().then(resolve))
-						this.run()
-				})
-		}
-		
-		run(){
-				if(this.queue.length >= limit || !this.queue.length) return
-				
-				this.count++
-				const task = this.queue.shift()
-				
-				task().finally(() => {
-						this.count--
-						this.run()
-				})
-		}
-}
-
-
-//冒泡排序： 提前终止，最好时间复杂度为O(n),平均时间复杂度（nF）
-function bubleSort(arr){
-		let len = arr.length
-		for(let i = 0;i<len;i++){
-				let swrapped = false
-				for(let j =0;j<len - i - 1;j++){
-						if(arr[j] > arr[j+1]){
-								[arr[j],arr[j+1]] = [arr[j+1],arr[j]]
-								swrapper = true
-						}
-				}
-				if(!swrapper) break;
-		}
-}
-
-//快速排序
-function quickSort(arr){
-		let mid = arr[0],len = arr.length,left = [],right = []
-		for(let i=1;i<len;i++){
-				if(arr[i] > mid){
-						right.push(arr[i])
-				}else{
-						left.push(arr[i])
-				}
-		}
-		return [...quickSort(left),mid,...quickSort(right)]
-}
-
-//Promise.all
-function myPromiseAll(promises){
-		return new Promise((resolve,reject) => {
-				if(!Array.isArray(promises)){
-						return reject (new Error("传入参数必须是可迭代对象")
-				}
-				
-				let completedCount = 0, result = [],total = promises.length
-				
-				if(total === 0){
-					return resolve(result)
-				}
-				
-				promises.forEach((item,index) => {
-					 Promise.resolve(item).then((value) => {
-					 			result[index] = value
-					 			completedCount++
-					 			
-					 			if(completedCount === total){
-					 				 resolve(result)
-					 			}
-					 }).catch((reason) => {
-					 		reject(reason)
-					 })
-				})
-		})
-}
-
-//new 
-function myNew(Func,...args){
-		const obj = {}
-		obj.__proto__ = Func.prototype
-		let result = Func.apply(this,args)
-		return typeof result === 'object' ? result : {}
-}
-```
-
 ## 20、关于Harness Engineering的思考
 
 > Harness = Agent - Model               - Langchain
@@ -1502,3 +1408,87 @@ function myNew(Func,...args){
  **Harness  Engineering 是不是噱头？**
 
 不是噱头，也不是终局。因为这个工程实实在在带来了效果，但是又仔细琢磨一下，这个工程里面的所有技术都不是新的，这些技术早就有了，比如任务规划（openspec/sdd范式编程），这个工程只是把这些技术重新组织了一下。随着大模型能力的强化，这些工程化的处理可能会被替代掉。
+
+## 21、Post RAG - PreRetriver 检索后
+
+> 与检索前对应，这里是对检索出来的文档进行特定处理
+
+- 重排序Reranker:  直接使用三方模型or 本地部署模型BGE
+
+​         - 向量相似度**用于检索前 / 粗召回阶段**，计算速度快、检索粒度较粗，能快速从海量库中筛选出一批相关候选文档，但匹配关联度不够精准；
+
+         - **Reranking 重排序放在检索后**，对向量召回的候选文档做二次精细排序，匹配精度更高，但推理速度相对更慢。
+
+
+
+
+
+- **RAG-Fusion**：多路召回 +  倒数排名融合（RRF）。
+
+  使用场景：混合检索或者多种检索方式 
+
+> 针对多路检索（**多路召回**  || 全文检索 + 相似度检索）导致的文档相关度排序不对
+
+**RRF计算权重**：RRFScore(d)=∑i=1nk+ri(d)1
+
+
+
+![image-20260507094205899](/Users/apple/Library/Application Support/typora-user-images/image-20260507094205899.png)
+
+
+
+- **上下文压缩和过滤**：用压缩器对检索到的信息过滤和处理，提取最有关的信息作为上下文
+
+> 从内容的角度，把不需要的过滤掉，需要的查询出来作为上下文输入给大模型，减少噪声
+
+代表：`EmbeddingsFilter`、`LLMExtractor`、`Pipeline组合压缩`
+
+- 时机：**检索召回后、重排之前**
+- 核心动作：**删冗余、去重复、精简内容、过滤无关文档块**
+- 效果：**减少文档数量 + 精简每篇内容长度**
+- 特点：偏**过滤 + 提纯**，把 “垃圾、重复、废话” 直接扔掉
+
+压缩过滤方式：
+
+1️⃣ 第一种：LLMChainExtractor（大模型提取器） - 作用：让大模型自己去读文档，只把和问题相关的句子抠出来，删掉废话。
+
+2️⃣ 第二种： LLMChainFilter (大模型过滤器)  - 作用：让大模型判断：这个文档和问题有没有关系？
+
+有关系 → 保留
+
+没关系 → 直接扔掉
+
+3️⃣ 第三种： EmbeddingsFilter（嵌入向量过滤器）- 作用：不用 LLM！只用向量相似度过滤，快、便宜、稳定。
+
+4️⃣ 第四种：组合压缩 -  
+
+**再细切分**（拆小）
+
+→ **冗余过滤**（删重复）
+
+→ **相关性过滤**（删无关）
+
+→ 输出压缩后的干净文档
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## 22、Advanced RAG项目实战 - MinerU 金融助手
+
