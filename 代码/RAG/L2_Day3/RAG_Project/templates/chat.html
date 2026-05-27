@@ -305,11 +305,14 @@
             function load_collections(){
                 fetch('/collection/', {
                     method: 'GET',
+                    headers: {
+                        'Cache-Control': 'no-cache'
+                    }
                 })
                 .then(response => response.json())
                 .then(data => {
                     // 创建option
-                    collectionName.innerText = ''
+                    collectionName.innerHTML = ''
                     for (const name of data.name_list) {
                         if (name === data.collection_name) {
                             collectionName.innerHTML += '<option value="'+ name +'" selected>' + name + '</option>';

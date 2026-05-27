@@ -1509,6 +1509,90 @@ ensembleRetriever = EnsembleRetriever(retrievers=[BM25_retriever, vector_retriev
 
 ![image-20260522093702166](/Users/apple/Library/Application Support/typora-user-images/image-20260522093702166.png)
 
+### 22.3 使用RAGas进行效果评估
+
+是通过特定的算法根据 top - k类似的原理进行计算, 构建数据集,可以用来评估精度，召回率，忠实度和相关性
+
+```
+data = {
+    "question": questions,  # 问题
+    "answer": answers,  # 回复结果
+    "contexts": contexts,  # 生成回答的原文档
+    "ground_truth": ground_truth  # 期望的回答
+}
+
+llms, embeddings = get_ali_clients()
+
+vllm = LangchainLLMWrapper(llms)
+vllm_e = LangchainEmbeddingsWrapper(embeddings)
+# 创建数据集
+dataset = Dataset.from_dict(data)
+# 执行评估  评估后的结果结果保存在result中
+result = evaluate(
+    dataset=dataset,
+    llm=vllm,
+    embeddings=vllm_e,
+    # metircs修改对应的评估数据
+    metrics=[
+        context_precision,
+        context_recall,
+        faithfulness,
+        answer_relevancy,
+    ], raise_exceptions=False
+)
+```
+
+> 针对特定指标的性能优化
+>
+> - （检索）高召回率 + 高精度 ： 在大规模数据中往往需要牺牲精确率来换取召回率 （引入噪声），后续的生成器很依赖召回的context，所以在生产中的客服助手之类的往往采用“高召回率 + 中精确度”来保证完整信息不遗漏
+>
+> 如何去确定我们的召回率和精度的一个比例呢？  - 通过F1分数
+>
+>  F1 = 2 * (召回率*精度) / (召回率 + 精度)
+>
+> - （生成）准确性 + 
+
+业界的召回率和精度的评估标准
+
+![image-20260522103201326](/Users/apple/Library/Application Support/typora-user-images/image-20260522103201326.png)
+
+指标-问题-模块的解决方案： 检索器优先 -> 生成器优化
+
+| 指标                                  | 核心问题场景                                                 | 问题指向       |
+| ------------------------------------- | ------------------------------------------------------------ | -------------- |
+| `context_recall`（上下文召回率）低    | 检索器未覆盖关键文档（如知识库缺失）、嵌入模型语义匹配能力不足 | 检索器         |
+| `context_precision`（上下文精确率）低 | 检索器返回大量无关文档、向量数据库索引策略错误、相关文档排名靠后 | 检索器         |
+| `faithfulness`（忠实度）低            | 生成模型未遵循上下文（提示词未约束 “基于给定信息回答”）、上下文过长导致信息稀释 | 生成器         |
+| `answer_relevancy`（回答相关性）低    | 生成模型未理解问题意图（复杂问题未用链式提示分解）、上下文与问题关联性弱 | 生成器         |
+| 四个指标均低                          | 系统性故障：检索质量极差（Recall/Precision 双低）导致生成器输入混乱，连锁拉低所有指标；也可能问题超出系统能力范围 | 优先排查检索器 |
+
+
+
+## 23、RAGflow引擎
+
+**目的**： 专门对`pdf`提供相对完整的可视化平台,对开发者快速使用以及落地RAG应用（把控质量、效果可优化的引擎），解决了langchain开发RAG系统的周期、复杂度过长过大的问题
+
+**优势**：使用细粒度的拆分策略进行切块识别
+
+
+
+## 24、langgraph
+
+### 24.1 通识篇
+
+1️⃣原理：将代理工程建模为图，适合Agent循环迭代执行的任务
+
+- 状态state：维护计算过程的上下文，实现动态决策
+- 节点Node：计算步骤，执行特定任务，定制适应工作流
+- 边Edge：     链接节点，定义计算流程，支持条件逻辑，实现复杂工作流
+
+2️⃣核心组件：
+
+3️⃣基础术语：
+
+
+
+ 
 
 
 
@@ -1525,5 +1609,12 @@ ensembleRetriever = EnsembleRetriever(retrievers=[BM25_retriever, vector_retriev
 
 
 
-## 22、Advanced RAG项目实战 - MinerU 金融助手
+
+
+
+
+
+
+
+
 

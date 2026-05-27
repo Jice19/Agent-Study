@@ -18,7 +18,7 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 
 # 允许的文件扩展名
-ALLOWED_EXTENSIONS = {'docx', 'pdf'}
+ALLOWED_EXTENSIONS = {'docx'}
 
 def allowed_file(filename):
     return '.' in filename and  \
@@ -47,15 +47,13 @@ def document_upload():
     elif request.method == 'POST':
         # 检查是否有文件被上传
         if 'file' not in request.files:
-            flash('没有选择文件')
-            return redirect(request.url)
+            return {'status': 'error', 'message': '没有选择文件'}
 
         file = request.files['file']
 
         # 如果用户没有选择文件，浏览器可能会提交一个空文件
         if file.filename == '':
-            flash('没有选择文件')
-            return redirect(request.url)
+            return {'status': 'error', 'message': '没有选择文件'}
 
         # 检查文件类型是否允许
         if file and allowed_file(file.filename):
@@ -69,9 +67,14 @@ def document_upload():
             # 上传成功后，将文档存入向量数据库
             global collection_name  # 更改全局变量collection_name
             collection_name = re.split(r'[/\\]', filename)[-1]
-            save_to_db(file_path, collection_name=collection_name)
+            result = save_to_db(file_path, collection_name=collection_name)
+            
+            if result == '读取文件内容为空':
+                return {'status': 'error', 'message': '读取文件内容为空'}
 
-        return redirect(request.url)
+            return {'status': 'success', 'message': '文件上传并处理成功'}
+        else:
+            return {'status': 'error', 'message': '不支持的文件类型，仅支持 docx'}
 
     else:
         return render_template('document_upload.html')

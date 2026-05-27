@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="193363a6-d605-43d5-ae12-5e2a137c547f" name="更改" comment="">
+      <change beforePath="$PROJECT_DIR$/../../RAG/L2_Day3/RAG_Project/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../RAG/L2_Day3/RAG_Project/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../RAG/L2_Day3/RAG_Project/chroma/chroma.sqlite3" beforeDir="false" afterPath="$PROJECT_DIR$/../../RAG/L2_Day3/RAG_Project/chroma/chroma.sqlite3" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../RAG/L2_Day3/RAG_Project/chroma/deaac869-f867-43c3-9bdc-604672f7f1ad/data_level0.bin" beforeDir="false" afterPath="$PROJECT_DIR$/../../RAG/L2_Day3/RAG_Project/chroma/deaac869-f867-43c3-9bdc-604672f7f1ad/data_level0.bin" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../RAG/L2_Day3/RAG_Project/templates/chat.html" beforeDir="false" afterPath="$PROJECT_DIR$/../../RAG/L2_Day3/RAG_Project/templates/chat.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../RAG/L2_Day3/RAG_Project/templates/document_upload.html" beforeDir="false" afterPath="$PROJECT_DIR$/../../RAG/L2_Day3/RAG_Project/templates/document_upload.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../RAG/L2_Day3/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../RAG/L2_Day3/models.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../RAG/rag效果评估/ragas_reval.csv" beforeDir="false" afterPath="$PROJECT_DIR$/../../RAG/rag效果评估/ragas_reval.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../../学习笔记/Agent开发.md" beforeDir="false" afterPath="$PROJECT_DIR$/../../../学习笔记/Agent开发.md" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="EmbeddingIndexingInfo">
+    <option name="fileBasedEmbeddingIndicesEnabled" value="true" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/../../.." />
+  </component>
+  <component name="McpProjectServerCommands">
+    <commands />
+    <urls />
+  </component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "associatedIndex": 2
+}]]></component>
+  <component name="ProjectId" id="3EHvM7f2gdcl5kIFUKQKWrBRJ6x" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.MCP Project settings loaded": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "git-widget-placeholder": "main"
+  }
+}]]></component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-python-sdk-4762d8aabb82-6d6dccd035ac-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.30387.173" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="默认任务">
+      <changelist id="193363a6-d605-43d5-ae12-5e2a137c547f" name="更改" comment="" />
+      <created>1779848258584</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1779848258584</updated>
+    </task>
+    <servers />
+  </component>
+</project>

@@ -218,10 +218,21 @@
                 // 上传完成
                 xhr.addEventListener('load', function() {
                     if (xhr.status === 200) {
-                        alert('文件上传成功!');
-                        resetUploader();
-                        window.open("/chat/", "_self");  // 在当前标签页打开
-
+                        try {
+                            const response = JSON.parse(xhr.responseText);
+                            if (response.status === 'success') {
+                                alert(response.message || '文件上传成功!');
+                                resetUploader();
+                                window.open("/chat/", "_self");  // 在当前标签页打开
+                            } else {
+                                alert('文件上传失败: ' + (response.message || '未知错误'));
+                                progressBar.style.display = 'none';
+                            }
+                        } catch(e) {
+                            alert('文件上传成功!');
+                            resetUploader();
+                            window.open("/chat/", "_self");
+                        }
                     } else {
                         alert('文件上传失败: ' + xhr.statusText);
                     }
