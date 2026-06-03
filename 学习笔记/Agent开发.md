@@ -1576,19 +1576,296 @@ result = evaluate(
 
 
 
-## 24、langgraph
+## 24、LangGraph — Agent 开发核心框架
+
+> 结合 day01（基础）和 day02（进阶）代码实践整理
 
 ### 24.1 通识篇
 
-1️⃣原理：将代理工程建模为图，适合Agent循环迭代执行的任务
+**核心认知：Agent = Workflow as Graph**
 
-- 状态state：维护计算过程的上下文，实现动态决策
-- 节点Node：计算步骤，执行特定任务，定制适应工作流
-- 边Edge：     链接节点，定义计算流程，支持条件逻辑，实现复杂工作流
+把 Agent 建模为一张**有状态的工作流图**，流程固定，变化发生在 State 的流转与 Human-in-the-Loop 的干预中。关注的核心是 **State 状态的管理与监控**。
 
-2️⃣核心组件：
+```
+Agent = StateGraph
+  ├── State（状态）     —— 图的共享内存，TypedDict + Reducer 控制合并策略
+  ├── Nodes（节点）     —— (state) -> dict，每个节点返回要更新的字段
+  ├── Edges（边）       —— 普通边 / 条件边 / Send 并行分发
+  ├── Checkpoints（持久化）—— 每步自动保存状态，支持暂停/恢复/回溯
+  ├── Configuration（配置）—— 运行时注入模型、线程等参数
+  ├── Subgraphs（子图） —— 模块化复用，图即节点
+  └── Human-in-the-Loop  —— interrupt() + Command，AI 暂停等人类决策
+```
 
-3️⃣基础术语：
+### 24.2 核心三要素：State → Graph → Compile
+
+```python
+from langgraph.graph import StateGraph
+from typing_extensions import TypedDict
+
+# ① State — 贯穿所有节点的共享数据
+class State(TypedDict):
+    messages: list[AnyMessage]
+    extra_field: int
+
+# ② 用 State 创建图
+graph_builder = StateGraph(State)
+
+# ③ 编译成可执行对象
+graph = graph_builder.compile()
+```
+
+### 24.3 State（状态）— Agent 的"记忆"
+
+#### Reducer：控制字段合并策略
+
+| 定义 | 行为 | 场景 |
+|------|------|------|
+| `foo: int` | **替换**（新值覆盖旧值） | 状态标记、配置项 |
+| `bar: Annotated[list, add]` | **追加合并**（operator.add） | 消息历史、工具结果 |
+
+```python
+class State(TypedDict):
+    foo: int                              # 直接替换
+    bar: Annotated[list[AnyMessage], add]  # 追加合并
+```
+
+#### 多 Schema 分离：控制节点输入/输出
+
+```python
+class InputState(TypedDict):     # 入口过滤
+    user_input: str
+class OutputState(TypedDict):    # 出口过滤
+    graph_output: str
+class OverallState(TypedDict):   # 全图共享
+    foo: str
+class PrivateState(TypedDict):   # 私有通道：只有声明该类型的节点能读写
+    bar: str
+```
+
+**关键机制**：node_1 → node_2 可传递 `PrivateState`，但 node_3（用 `OverallState`）看不到私有字段 → **节点间数据隔离**。
+
+### 24.4 Nodes & Edges（节点与边）
+
+#### 节点：`(state) -> dict`
+
+```python
+def chatbot(state: State):
+    return {"messages": [llm.invoke(state["messages"])]}
+
+graph_builder.add_node("chatbot", chatbot)
+```
+
+#### 边：控制流转的三种模式
+
+```python
+# ① 固定边：A → B 必定执行
+graph_builder.add_edge(START, "chatbot")
+
+# ② 条件边：运行时根据 state 动态决定
+graph_builder.add_conditional_edges("chatbot", route_tools)
+
+# ③ 并行分发（Send 列表）：扇出多条分支同时执行
+def router(state):
+    return [Send("analyze", {"topic": t}) for t in state["topics"]]
+```
+
+**router_func 的三种返回值：**
+
+| 返回值 | 行为 |
+|--------|------|
+| `"node_a"` | 单一路由 |
+| `["node_a", "node_b"]` | 串行走到多个节点 |
+| `[Send(...), Send(...)]` | 并行分发，每个 Send 携带独立参数 |
+
+### 24.5 Checkpoints（持久化）— Agent 的"长期记忆"
+
+每次 `invoke` 后自动保存状态快照，支持多轮对话、暂停/恢复、回溯历史。
+
+```python
+from langgraph.checkpoint.memory import MemorySaver
+
+checkpointer = MemorySaver()
+graph = workflow.compile(checkpointer=checkpointer)
+
+config = {"configurable": {"thread_id": "1"}}
+
+# 调用（状态自动保存到 thread_1）
+graph.invoke({"foo": ""}, config)
+
+# 再次调用同一 thread_id，自动加载之前 state
+graph.invoke({"foo": "update"}, config)
+
+# 查看当前状态 / 回溯到指定 checkpoint
+state = graph.get_state(config)
+checkpoint_id = state.config['configurable']['checkpoint_id']
+graph.get_state({"configurable": {"thread_id": "1", "checkpoint_id": checkpoint_id}})
+```
+
+| 存储 | 场景 |
+|------|------|
+| `MemorySaver` | 开发测试（重启丢失） |
+| `SqliteSaver` | 本地持久化 |
+| `PostgresSaver` | 生产环境 |
+
+### 24.6 Configuration（运行时配置）
+
+通过 `RunnableConfig` 运行时注入参数，无需改图结构：
+
+```python
+from langchain_core.runnables.config import RunnableConfig
+
+models = {"openai": ChatOpenAI(model="gpt-4o-mini"),
+          "claude": ChatOpenAI(model="claude-3-5-sonnet-latest")}
+
+def _call_model(state, config: RunnableConfig):
+    model_name = config["configurable"].get("model", "openai")
+    return {"messages": [models[model_name].invoke(state["messages"])]}
+
+# 运行时选模型
+graph.invoke({"messages": [...]}, config={"configurable": {"model": "claude"}})
+```
+
+### 24.7 Subgraphs（子图）— 模块化复用
+
+两种集成方式：
+
+```python
+# 方式一：子图直接当节点（共享 state key）
+builder.add_node("node_2", compiled_subgraph)
+
+# 方式二：函数包装（手动转换 state，完全隔离）
+def call_subgraph(state: ParentState):
+    response = subgraph.invoke({"bar": state["foo"]})  # 父→子
+    return {"foo": response["bar"]}                     # 子→父
+builder.add_node("node_2", call_subgraph)
+```
+
+### 24.8 Human-in-the-Loop（人机交互）
+
+两个核心机制：
+
+| 机制 | 位置 | 作用 |
+|------|------|------|
+| `interrupt_before=["node"]` | `compile()` 参数 | 进入节点**前**自动暂停 |
+| `interrupt()` | 节点函数**内部** | 函数内暂停，等人类输入 |
+
+```python
+from langgraph.types import interrupt, Command
+
+def human_review(state: State):
+    # 暂停执行，展示当前 state 给人类
+    value = interrupt({
+        "text_to_revise": state["some_text"],
+        "instructions": "请修改以下文本："
+    })
+    return {"some_text": value}  # value = Command(resume=...) 传入的值
+
+# 第一次执行 → 运行到 interrupt 处暂停
+graph.invoke(initial_state, config=thread_config)
+
+# 人类恢复 → Command(resume=...) 把值传给 interrupt()
+graph.invoke(Command(resume="人类修改后的内容"), config=thread_config)
+```
+
+**完整交互流程：**
+
+```
+auto_process (LLM) → interrupt_before 暂停 → human_review 节点
+    → interrupt() 等待输入 → Command(resume=human_input) → 继续执行
+```
+
+支持**循环交互**：`add_edge("human_review", "auto_process")` 实现反复确认。
+
+### 24.9 完整 Agent 实战：ChatBot + Tools + Memory + Router
+
+```
+START → chatbot(LLM) ──有tool_calls──▶ tools(执行工具) ──▶ chatbot(处理结果)
+            │                                                    │
+            └──无tool_calls──▶ END                   无tool_calls──▶ END
+```
+
+**关键代码：**
+
+```python
+# ① 绑定工具
+tool = TavilySearchResults(max_results=2)
+llm_with_tools = llm.bind_tools([tool])
+
+# ② 工具执行节点
+class BasicToolNode:
+    def __init__(self, tools):
+        self.tools_by_name = {tool.name: tool for tool in tools}
+    def __call__(self, inputs: dict):
+        outputs = []
+        for tc in inputs["messages"][-1].tool_calls:
+            result = self.tools_by_name[tc["name"]].invoke(tc["args"])
+            outputs.append(ToolMessage(content=json.dumps(result), name=tc["name"], tool_call_id=tc["id"]))
+        return {"messages": outputs}
+
+# ③ 路由 — Agent 的"决策中枢"
+def route_tools(state: State):
+    msg = state["messages"][-1]
+    if hasattr(msg, "tool_calls") and len(msg.tool_calls) > 0:
+        return "tools"
+    return END
+
+# ④ 组装
+builder.add_node("chatbot", chatbot)
+builder.add_node("tools", BasicToolNode(tools=[tool]))
+builder.add_conditional_edges("chatbot", route_tools, {"tools": "tools", END: END})
+builder.add_edge("tools", "chatbot")
+graph = builder.compile(checkpointer=MemorySaver())
+```
+
+### 24.10 Map-Reduce 并行模式
+
+```python
+from langgraph.types import Send
+
+def continue_to_jokes(state):
+    return [Send("generate_joke", {"subject": s}) for s in state['subjects']]
+
+class OverallState(TypedDict):
+    subjects: list[str]
+    jokes: Annotated[list[str], operator.add]  # reducer 自动合并结果
+
+builder.add_node("generate_joke", lambda state: {"jokes": [f"Joke about {state['subject']}"]})
+builder.add_conditional_edges(START, continue_to_jokes)
+builder.add_edge("generate_joke", END)
+```
+
+**三段式执行：**
+1. **扇出**：每个 `Send` 创建一条分支
+2. **并行**：各分支同时执行，互不等待
+3. **合并**：`operator.add` 自动拼合结果
+
+并行不是靠多线程，是靠 `Send` 列表让引擎一次性扇出多条执行分支。
+
+### 24.11 可视化与调试
+
+```python
+# 生成图
+graph.get_graph().draw_mermaid_png(output_file_path='./graph.png')
+
+# 流式看执行过程（看子图内部：subgraphs=True）
+for event in graph.stream(input, subgraphs=True):
+    print(event)
+```
+
+### 24.12 Agent 开发概念总览
+
+| 层级 | 概念 | 一句话 |
+|------|------|--------|
+| **基础** | State + Node + Edge | 图的骨架：数据怎么流、节点干什么、流转到哪 |
+| **状态管理** | Reducer + Schema 分离 | 控制字段合并方式、节点数据可见性 |
+| **持久化** | Checkpoints | 每步保存状态，支持暂停/恢复/回溯 |
+| **配置化** | Configuration | 运行时注入模型、线程等参数 |
+| **模块化** | Subgraphs | 图当节点用，实现复用和分层 |
+| **人机交互** | interrupt + Command | AI 自动执行到关键点，暂停等人类决策 |
+| **Agent能力** | Tools + Router | LLM 决定调什么工具，结果反馈给 LLM |
+| **并行** | Send + conditional_edges | 扇出多条分支并行执行，reducer 自动合并 |
+| **调试** | Visualization + Stream | 画图看结构，流式看过程 |
 
 
 
