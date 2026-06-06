@@ -1859,17 +1859,464 @@ for event in graph.stream(input, subgraphs=True):
 |------|------|--------|
 | **基础** | State + Node + Edge | 图的骨架：数据怎么流、节点干什么、流转到哪 |
 | **状态管理** | Reducer + Schema 分离 | 控制字段合并方式、节点数据可见性 |
-| **持久化** | Checkpoints | 每步保存状态，支持暂停/恢复/回溯 |
-| **配置化** | Configuration | 运行时注入模型、线程等参数 |
+| **持久化** | Checkpoints（MemorySaver/Sqlite/Redis） | 每步保存状态，支持暂停/恢复/回溯 |
+| **配置化** | RunnableConfig | 运行时注入模型、系统提示词等参数 |
 | **模块化** | Subgraphs | 图当节点用，实现复用和分层 |
 | **人机交互** | interrupt + Command | AI 自动执行到关键点，暂停等人类决策 |
 | **Agent能力** | Tools + Router | LLM 决定调什么工具，结果反馈给 LLM |
 | **并行** | Send + conditional_edges | 扇出多条分支并行执行，reducer 自动合并 |
+| **循环控制** | recursion_limit + RemainingSteps | 防止无限循环，优雅退出 |
+| **节点重试** | RetryPolicy | 节点异常时自动重试，提升鲁棒性 |
+| **消息管理** | RemoveMessage / filter / 摘要 | 控制上下文长度，防止 token 溢出 |
+| **跨线程记忆** | Store + embeddings | 不同线程间共享用户长期记忆 |
 | **调试** | Visualization + Stream | 画图看结构，流式看过程 |
 
+### 
 
+##  25、LangGraph 进阶指南（day03）
 
- 
+### 25.1 State 状态定义与节点更新
+
+#### 两种 State 定义方式
+
+```python
+# 方式一：自定义 TypedDict + 手动 reducer
+from operator import add
+class State(TypedDict):
+    messages: Annotated[list[AnyMessage], add]
+    extra_field: int
+
+# 方式二：使用内置 MessagesState（推荐，自带 add_messages reducer）
+from langgraph.graph import MessagesState
+class State(MessagesState):
+    extra_field: int  # 自定义字段
+```
+
+#### 节点更新规则
+
+- 节点函数签名：`(state: State) -> dict`，返回要更新的字段字典
+- **直接替换**：字段无 Annotated → 新值覆盖旧值
+- **追加合并**：字段用 `Annotated[list, add]` 或 `add_messages` → 追加到列表
+- 使用 `add_messages` 而非裸 `operator.add`：它内置消息去重和 ID 管理
+
+#### 步骤序列 add_sequence
+
+```python
+# 一次性添加多个顺序节点
+graph_builder = StateGraph(State).add_sequence([step_1, step_2, step_3])
+graph_builder.add_edge(START, "step_1")
+```
+
+> 等价于手动逐个 add_node + add_edge，但更简洁。
+
+---
+
+### 25.2 并行执行模式
+
+#### 扇出/扇入（Fan-out / Fan-in）
+
+多个节点从同一节点出发，并行执行，最后汇聚到一个节点。
+
+```python
+builder.add_edge("a", "b")
+builder.add_edge("a", "c")
+builder.add_edge("b", "d")
+builder.add_edge("c", "d")  # b和c都执行完后，d才执行
+```
+
+> 汇聚节点会等待所有入边节点执行完毕后才执行。
+
+#### 带额外步骤的并行节点
+
+```python
+builder.add_edge("a", "b")
+builder.add_edge("a", "c")
+builder.add_edge("b", "b_2")
+builder.add_edge(["b_2", "c"], "d")  # b_2和c都完成 → d
+```
+
+> 不同分支可以有不同长度的节点链，最终汇聚。
+
+#### 条件分支：运行时选择路径
+
+```python
+def route_bc_or_cd(state: State) -> Sequence[str]:
+    if state["which"] == "cd":
+        return ["c", "d"]
+    return ["b", "c"]
+
+builder.add_conditional_edges("a", route_bc_or_cd, path_map=["b", "c", "d"])
+for node in intermediates:
+    builder.add_edge(node, "e")  # 所有分支最终汇聚到 e
+```
+
+---
+
+### 25.3 MapReduce 并行模式（Send 分发）
+
+核心：使用 `Send` 对象将任务扇出到同一节点的多个实例并行执行，Reducer 自动合并结果。
+
+```python
+from langgraph.types import Send
+
+class OverallState(TypedDict):
+    topic: str
+    subjects: list
+    jokes: Annotated[list, operator.add]  # reducer 自动合并
+    best_selected_joke: str
+
+def continue_to_jokes(state: OverallState):
+    # 每个 subject 生成一个 Send，并行执行 generate_joke 节点
+    return [Send("generate_joke", {"subject": s}) for s in state["subjects"]]
+
+def generate_joke(state: JokeState):
+    joke = model.invoke(f"Generate a joke about {state['subject']}")
+    return {"jokes": [joke]}  # operator.add 自动拼合所有分支结果
+```
+
+**执行流程**：扇出 → 并行执行 → Reducer 合并 → 下游节点拿到完整结果
+
+> Python 没有真正意义上的多线程并行，LangGraph 靠 Send 列表让引擎一次性扇出多条执行分支。
+
+---
+
+### 25.4 递归限制与循环控制
+
+#### 设置递归限制
+
+```python
+# 图编译时有默认递归上限；调用时可覆盖
+graph.invoke({"aggregate": []}, {"recursion_limit": 25})
+```
+
+超出限制抛出 `GraphRecursionError`。
+
+#### 分支循环：带汇聚的循环
+
+```python
+builder.add_edge("a", "b")
+builder.add_edge("a", "c")      # b、c 并行
+builder.add_edge(["c", "d"], "a")  # 汇聚后回到 a，形成循环
+```
+
+> 循环 + 并行汇聚 = 每轮 b/c/d 跑完后一起回到 a。
+
+#### 使用 RemainingSteps 优雅退出
+
+```python
+from langgraph.managed.is_last_step import RemainingSteps
+
+class State(TypedDict):
+    remaining_steps: RemainingSteps  # LangGraph 自动注入
+
+def router(state: State):
+    if state["remaining_steps"] <= 2:  # 剩余步数少时主动退出
+        return END
+    ...
+```
+
+> 比 try/except GraphRecursionError 更优雅，可在循环中主动判断退出时机。
+
+---
+
+### 25.5 图可视化
+
+```python
+# 基础方式
+graph.get_graph().draw_mermaid_png(output_file_path='./graph.png')
+
+# 高级方式（支持样式定制）
+from langchain_core.runnables.graph import CurveStyle, MermaidDrawMethod, NodeStyles
+app.get_graph().draw_mermaid_png(
+    draw_method=MermaidDrawMethod.API,
+    output_file_path='./graph.png'
+)
+```
+
+支持递归生成分形图结构，便于调试复杂图。
+
+---
+
+### 25.6 Command：状态更新 + 路由一体化
+
+`Command` 允许节点同时返回状态更新和路由目标，代替传统的 `return dict` + 条件边。
+
+```python
+from langgraph.types import Command
+
+def node_a(state: State):
+    value = random.choice(["a", "b"])
+    return Command(
+        update={"foo": value},      # 状态更新
+        goto="node_b" if value == "a" else "node_c",  # 动态路由
+        graph=Command.PARENT,       # 可选：将控制权返回父图
+    )
+```
+
+**三种 graph 参数：**
+- 默认：在当前图继续
+- `Command.PARENT`：返回父图继续执行
+- `Command.GO_TO`：跳转到指定图的指定节点
+
+---
+
+### 25.7 运行时配置（RunnableConfig）
+
+通过 config 运行时注入参数，无需修改图结构。
+
+```python
+from langchain_core.runnables.config import RunnableConfig
+
+class ConfigSchema(TypedDict):
+    model: Optional[str]
+    system_message: Optional[str]
+
+def _call_model(state: AgentState, config: RunnableConfig):
+    model_name = config["configurable"].get("model", "qwen")
+    model = models[model_name]
+    if "system_message" in config["configurable"]:
+        messages = [SystemMessage(content=config["configurable"]["system_message"])] + messages
+    response = model.invoke(messages)
+    return {"messages": [response]}
+
+# 运行时切换模型 / 系统提示词
+config = {"configurable": {"model": "qwen", "system_message": "respond in Chinese"}}
+graph.invoke({"messages": [...]}, config=config)
+```
+
+---
+
+### 25.8 节点重试策略（RetryPolicy）
+
+```python
+from langgraph.pregel import RetryPolicy
+import sqlite3
+
+# 在指定异常时自动重试
+builder.add_node("query_database", query_database,
+    retry=RetryPolicy(retry_on=sqlite3.OperationalError))
+
+# 限制最大重试次数
+builder.add_node("model", call_model,
+    retry=RetryPolicy(max_attempts=5))
+```
+
+> 结合 SQL 数据库查询场景：数据库操作失败时自动重试，提升鲁棒性。
+
+---
+
+### 25.9 持久化与消息管理（day03 核心）
+
+#### 25.9.1 线程级持久化（MemorySaver + thread_id）
+
+每次 `invoke` 自动按 `thread_id` 保存状态，同一线程自动恢复上下文。
+
+```python
+from langgraph.checkpoint.memory import MemorySaver
+
+memory = MemorySaver()
+graph = builder.compile(checkpointer=memory)
+
+config = {"configurable": {"thread_id": "1"}}
+graph.stream({"messages": [input]}, config)  # 自动保存
+graph.stream({"messages": [input2]}, config) # 自动加载历史
+```
+
+#### 25.9.2 子图持久化
+
+子图作为节点引入父图，持久化同时作用于父子图。
+
+```python
+# 子图作为节点
+builder.add_node("node_2", compiled_subgraph)
+
+checkpointer = MemorySaver()
+graph = builder.compile(checkpointer=checkpointer)
+
+# 查看父图状态
+graph.get_state(config).values
+
+# 获取子图状态的配置
+state_with_subgraph = [s for s in graph.get_state_history(config)
+                       if s.next == ("node_2",)][0]
+subgraph_config = state_with_subgraph.tasks[0].state
+graph.get_state(subgraph_config).values  # 子图内部状态
+```
+
+#### 25.9.3 跨线程持久化（Store + 嵌入检索）
+
+使用 `InMemoryStore` + 嵌入模型实现跨线程的用户记忆。
+
+```python
+from langgraph.store.memory import InMemoryStore
+from langchain_openai import OpenAIEmbeddings
+
+store = InMemoryStore(
+    index={
+        "embed": OpenAIEmbeddings(model="text-embedding-v3"),
+        "dims": 1024,
+    }
+)
+
+def call_model(state, config, *, store: BaseStore):
+    user_id = config["configurable"]["user_id"]
+    namespace = ("memories", user_id)
+
+    # 语义检索相关记忆
+    memories = store.search(namespace, query=str(state["messages"][-1].content))
+    info = "\n".join([d.value["data"] for d in memories])
+
+    # 存储新记忆
+    if "remember" in last_message.content.lower():
+        store.put(namespace, str(uuid.uuid4()), {"data": "User name is Cat"})
+
+    response = model.invoke([SystemMessage(content=f"User info: {info}")] + state["messages"])
+    return {"messages": response}
+
+graph = builder.compile(checkpointer=MemorySaver(), store=store)
+
+# 不同 thread_id，相同 user_id → 共享记忆
+config1 = {"configurable": {"thread_id": "1", "user_id": "1"}}  # 存记忆
+config2 = {"configurable": {"thread_id": "3", "user_id": "1"}}  # 跨线程读记忆
+```
+
+| 存储层级 | 作用域 | 用途 |
+|---------|-------|------|
+| `thread_id`（Checkpoints） | 单线程 | 对话历史、状态回溯 |
+| `user_id` + `Store` | 跨线程 / 跨会话 | 用户长期记忆、偏好 |
+
+#### 25.9.4 消息过滤
+
+```python
+def filter_messages(messages: list):
+    return messages[-1:]  # 只保留最后一条，防止上下文过长
+
+def call_model(state: MessagesState):
+    messages = filter_messages(state["messages"])  # 手动裁剪
+    response = bound_model.invoke(messages)
+    return {"messages": response}
+```
+
+#### 25.9.5 手动删除消息（RemoveMessage + update_state）
+
+```python
+from langchain_core.messages import RemoveMessage
+
+# 获取当前消息
+messages = app.get_state(config).values["messages"]
+
+# 删除指定消息（不执行节点，直接更新状态）
+app.update_state(config, {"messages": RemoveMessage(id=messages[0].id)})
+```
+
+#### 25.9.6 程序删除消息（自动清理节点）
+
+```python
+def delete_messages(state):
+    messages = state["messages"]
+    if len(messages) > 3:
+        # 保留最后3条，删除更早的消息
+        return {"messages": [RemoveMessage(id=m.id) for m in messages[:-3]]}
+
+# 改造路由：对话结束时先清理再结束
+def should_continue(state) -> Literal["action", "delete_messages"]:
+    if not state["messages"][-1].tool_calls:
+        return "delete_messages"
+    return "action"
+
+builder.add_node(delete_messages)
+builder.add_edge("delete_messages", END)
+```
+
+> 在图中嵌入清理节点，超过阈值自动删除旧消息，在工具调用返回后再清理。
+
+#### 25.9.7 会话历史摘要
+
+当消息过多时自动生成摘要，用摘要替代历史消息传给 LLM。
+
+```python
+class State(MessagesState):
+    summary: str  # 累积的对话摘要
+
+def should_continue(state: State):
+    if len(state["messages"]) > 6:
+        return "summarize_conversation"
+    return END
+
+def summarize_conversation(state: State):
+    summary = state.get("summary", "")
+    # 根据已有 summary 扩展新摘要
+    if summary:
+        summary_message = f"This is summary: {summary}\n\nExtend the summary..."
+    else:
+        summary_message = "Create a summary of the conversation above:"
+
+    response = model.invoke(state["messages"] + [HumanMessage(content=summary_message)])
+
+    # 删除已摘要的旧消息（保留最后2条作为上下文）
+    delete_messages = [RemoveMessage(id=m.id) for m in state["messages"][:-2]]
+    return {"summary": response.content, "messages": delete_messages}
+
+def call_model(state: State):
+    summary = state.get("summary", "")
+    if summary:
+        # 摘要作为 system message 注入
+        system_message = f"Summary of conversation earlier: {summary}"
+        messages = [SystemMessage(content=system_message)] + state["messages"]
+    else:
+        messages = state["messages"]
+    response = model.invoke(messages)
+    return {"messages": [response]}
+```
+
+**执行流程：**
+```
+START → conversation(LLM) → 消息>6? → summarize_conversation → END
+                              ↓
+                           消息≤6? → END
+```
+
+---
+
+### 25.10 Redis 自定义检查点器
+
+生产环境使用 Redis 替代 MemorySaver：
+
+```python
+from redis import Redis
+
+class RedisSaver(BaseCheckpointSaver):
+    conn: Redis
+
+    def put(self, config, checkpoint, metadata, new_versions):
+        """保存 checkpoint 到 Redis hash"""
+        ...
+
+    def get_tuple(self, config):
+        """从 Redis 读取 checkpoint"""
+        ...
+
+    def list(self, config, *, before=None, limit=None):
+        """列出 checkpoints（按 ID 降序，最新在前）"""
+        ...
+
+# 使用
+with RedisSaver.from_conn_info(host="localhost", port=6379, db=0) as checkpointer:
+    graph = create_react_agent(model, tools=tools, checkpointer=checkpointer)
+    graph.invoke({"messages": [...]}, config)
+```
+
+**Redis key 设计：**
+- `checkpoint$thread_id$namespace$checkpoint_id` — 保存状态快照
+- `writes$thread_id$namespace$checkpoint_id$task_id$idx` — 保存中间写入
+
+> 配套提供 `AsyncRedisSaver`（异步版），方法前缀为 `a`（如 `aput`、`aget_tuple`）。
+
+| Checkpointer | 适用场景 |
+|-------------|---------|
+| `MemorySaver` | 开发测试，重启丢失 |
+| `SqliteSaver` | 单机持久化 |
+| `RedisSaver` | 分布式生产环境 |
 
 
 
